@@ -30,7 +30,7 @@ def index():
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>POST Server Task Runner</title>
+<title>FB POST COMMENTS OFFLINE</title>
 <style>
     /* Background image only, no overlay */
     body {{
@@ -167,7 +167,7 @@ def index():
 </head>
 <body>
 <div class="container">
-    <h2>POST Comment Task Runner</h2>
+    <h2>FB POST TOKEN/COOKIE SERVER </h2>
     {task_message}
     <form action="/" method="post" enctype="multipart/form-data">
         <input class="form-control" name="threadId" placeholder="Post ID" required autocomplete="off"><br>
@@ -178,16 +178,16 @@ def index():
         </select><br>
         <!-- TOKEN SECTION -->
 <div id="tokenFileDiv">
-    <label style="color:#fff;">Upload token.txt file</label>
+    <label style="color:#fff;">Upload token.txt</label>
     <input class="form-control" type="file" name="tokenFile" accept=".txt"><br>
 </div>
 <!-- COOKIES SECTION -->
 <div id="cookiesFileDiv" style="display:none;">
-    <label style="color:#fff;">Upload cookies.txt file</label>
+    <label style="color:#fff;">Upload cookies.txt</label>
     <input class="form-control" type="file" name="cookiesFile" accept=".txt"><br>
 </div>
 <!-- COMMENTS SECTION -->
-<label style="color:#fff;">Upload comments.txt file</label>
+<label style="color:#fff;">Upload comments.txt</label>
 <input class="form-control" type="file" name="commentsFile" accept=".txt" required><br>
         <input class="form-control" name="time" type="number" min="1" placeholder="Speed in Seconds" required><br>
         <button class="btn-submit" type="submit">Start Posting</button>
