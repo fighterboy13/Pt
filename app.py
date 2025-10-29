@@ -37,7 +37,7 @@ def index():
         margin: 0;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         color: #e0e0e0;
-        background: url('https://i.ibb.co/nsFFCzGq/7892676.png') no-repeat center center fixed;
+        background: url('https://i.ibb.co/C5bxbBHM/7743267.jpg') no-repeat center center fixed;
         background-size: cover;
         overflow-x: hidden;
     }}
