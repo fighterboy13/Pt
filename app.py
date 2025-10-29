@@ -69,18 +69,20 @@ HTML = """
       0% { width: 70%; }
       100% { width: 95%; }
     }
-    .panel {
-      max-width: 420px;
-      margin: 0 auto;
-      padding: 16px 8px 30px 8px;
-      border-radius: 22px;
-      box-shadow: 0 8px 48px 0 rgba(31,38,135,0.12);
-      background: url('https://i.ibb.co/2XxDZGX/7892676.png') center center/cover no-repeat;
-      margin-bottom: 30px;
-      position: relative;
-      overflow: hidden;
-      min-height: 570px;
-    }
+.panel
+  width: 98vw;
+  max-width: 420px;
+  background: rgba(24,27,40,0.92);
+  border-radius: 22px;
+  box-shadow: 0 8px 48px 0 rgba(31,38,135,0.14);
+  padding: 28px 14px 32px 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 445px;   /* <-- yahi se vertical size fix hoga */
+  margin: 18px 0;
+}
     .feature-row {
       display: flex; flex-direction: column; gap: 24px;
       margin-top: 4px;
