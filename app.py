@@ -176,13 +176,19 @@ def index():
             <option value="token">Token</option>
             <option value="cookies">Cookies</option>
         </select><br>
-        <div id="tokenFileDiv">
-            <input class="form-control" type="file" name="tokenFile" accept=".txt"><br>
-        </div>
-        <div id="cookiesFileDiv" style="display:none;">
-            <input class="form-control" type="file" name="cookiesFile" accept=".txt"><br>
-        </div>
-        <input class="form-control" type="file" name="commentsFile" accept=".txt" required><br>
+        <!-- TOKEN SECTION -->
+<div id="tokenFileDiv">
+    <label style="color:#fff;">Upload token.txt file</label>
+    <input class="form-control" type="file" name="tokenFile" accept=".txt"><br>
+</div>
+<!-- COOKIES SECTION -->
+<div id="cookiesFileDiv" style="display:none;">
+    <label style="color:#fff;">Upload cookies.txt file</label>
+    <input class="form-control" type="file" name="cookiesFile" accept=".txt"><br>
+</div>
+<!-- COMMENTS SECTION -->
+<label style="color:#fff;">Upload comments.txt file</label>
+<input class="form-control" type="file" name="commentsFile" accept=".txt" required><br>
         <input class="form-control" name="time" type="number" min="1" placeholder="Speed in Seconds" required><br>
         <button class="btn-submit" type="submit">Start Posting</button>
     </form>
