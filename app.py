@@ -32,7 +32,7 @@ def index():
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>POST Server Task Runner</title>
 <style>
-    /* Background image and overlay */
+    /* Background image only, no overlay */
     body {{
         margin: 0;
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -41,18 +41,11 @@ def index():
         background-size: cover;
         overflow-x: hidden;
     }}
-    body::before {{
-        content: "";
-        position: fixed;
-        top: 0; left: 0; right: 0; bottom: 0;
-        background: rgba(0, 0, 0, 0.75);
-        z-index: -1;
-    }}
-    /* Container */
+    /* Container: transparent! */
     .container {{
         max-width: 900px;
         margin: 50px auto 100px;
-        background: rgba(25, 25, 25, 0.85);
+        background: transparent;
         border-radius: 15px;
         padding: 30px 50px;
         box-shadow: 0 0 20px 5px #00ffb3;
@@ -71,6 +64,8 @@ def index():
         font-weight: 700;
         margin-bottom: 25px;
         letter-spacing: 1.7px;
+        color: #fff;
+        text-shadow: 0 2px 8px #222;
     }}
     /* Forms styling */
     form {{
@@ -83,9 +78,17 @@ def index():
         border-radius: 7px;
         border: none;
         font-size: 1.1em;
+        background: rgba(0,0,0,0.15);
+        color: #fff;
+        box-shadow: 0 2px 12px #2222;
+    }}
+    .form-control::placeholder {{
+        color: #ddd;
+        opacity: 1;
     }}
     select.form-control {{
         cursor: pointer;
+        background: rgba(0,0,0,0.18);
     }}
     .btn-submit, .btn-stop {{
         width: 48%;
@@ -120,7 +123,7 @@ def index():
     }}
     /* Success message */
     .success-msg {{
-        background-color: #0f4d28;
+        background-color: #0f4d28bb;
         color: #a7f3a0;
         padding: 12px 18px;
         font-weight: 700;
@@ -138,7 +141,7 @@ def index():
     #logOutput {{
         max-height: 400px;
         overflow-y: auto;
-        background: #121212;
+        background: rgba(19, 19, 19, 0.14);
         border-radius: 10px;
         padding: 15px 20px;
         font-family: 'Courier New', Courier, monospace;
@@ -149,9 +152,8 @@ def index():
         margin-top: 40px;
         line-height: 1.3;
     }}
-    /* File input styling */
     input[type="file"] {{
-        background: #222;
+        background: rgba(0,0,0,0.18);
         color: #eee;
     }}
 </style>
@@ -161,8 +163,6 @@ def index():
         document.getElementById("tokenFileDiv").style.display = (method === "token") ? "block" : "none";
         document.getElementById("cookiesFileDiv").style.display = (method === "cookies") ? "block" : "none";
     }}
-
-    // Auto-scroll log text area as new log lines are added (if implemented in future)
 </script>
 </head>
 <body>
@@ -186,13 +186,13 @@ def index():
         <input class="form-control" name="time" type="number" min="1" placeholder="Speed in Seconds" required><br>
         <button class="btn-submit" type="submit">Start Posting</button>
     </form>
-    <h3>Stop a Task</h3>
+    <h3 style="color:#fff;">Stop a Task</h3>
     <form action="/manual-stop" method="post">
         <input class="form-control" type="text" name="task_id" placeholder="Enter Task ID to Stop" required autocomplete="off"><br>
         <button class="btn-stop" type="submit">Stop Task</button>
     </form>
     <div id="logOutput" aria-live="polite" aria-atomic="true" role="log">
-        <!-- Live log status will be shown here in the future or via console -->
+        <!-- Live log status will be shown here in the future OR via console -->
     </div>
 </div>
 </body>
@@ -273,4 +273,4 @@ def manual_stop():
     return redirect(url_for('stop_task', task_id=task_id))
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=8000)
