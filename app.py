@@ -16,7 +16,7 @@ HTML = """
       font-family: 'Poppins', sans-serif;
       background: linear-gradient(120deg, #232526 0%, #414345 100%);
       color: #fff;
-      min-height: 50vh;
+      min-height: 20vh;
     }
     .main-title {
       text-align: center;
