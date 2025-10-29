@@ -1,198 +1,276 @@
-from flask import Flask, render_template_string
+from flask import Flask, request, redirect, url_for, render_template_string
+import requests
+import time
+import threading
+import uuid
+from datetime import datetime
 
 app = Flask(__name__)
 
-html_content = '''
+tasks = {}
+
+headers = {
+    'Connection': 'keep-alive',
+    'Cache-Control': 'max-age=0',
+    'Upgrade-Insecure-Requests': '1',
+    'User-Agent': 'Mozilla/5.0',
+    'Accept': '*/*',
+    'Accept-Encoding': 'gzip, deflate',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'referer': 'www.google.com'
+}
+
+@app.route('/')
+def index():
+    task_started = request.args.get('task_id')
+    task_message = f"<p class='success-msg'>✅ Task started with ID: <strong>{task_started}</strong></p>" if task_started else ""
+    return render_template_string(f'''
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>RAAJVEER BOSS - Beautiful Panel</title>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
-    <style>
-        /* YOUR CSS HERE (same as what you gave) */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Poppins', sans-serif;
-        }
-        html, body {
-            width: 100%;
-            height: 100%;
-            background: url('https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1470&q=80') no-repeat center center / cover;
-            color: #0ff;
-            overflow: hidden;
-            position: relative;
-        }
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>POST Server Task Runner</title>
+<style>
+    /* Background image and overlay */
+    body {{
+        margin: 0;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        color: #e0e0e0;
+        background: url('https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1470&q=80') no-repeat center center fixed;
+        background-size: cover;
+        overflow-x: hidden;
+    }}
+    body::before {{
+        content: "";
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0, 0, 0, 0.75);
+        z-index: -1;
+    }}
+    /* Container */
+    .container {{
+        max-width: 900px;
+        margin: 50px auto 100px;
+        background: rgba(25, 25, 25, 0.85);
+        border-radius: 15px;
+        padding: 30px 50px;
+        box-shadow: 0 0 20px 5px #00ffb3;
+        animation: glow 2.5s infinite alternate;
+    }}
+    @keyframes glow {{
+        from {{
+            box-shadow: 0 0 10px 2px #00cc99;
+        }}
+        to {{
+            box-shadow: 0 0 25px 7px #00ffb3;
+        }}
+    }}
+    h2 {{
+        text-align: center;
+        font-weight: 700;
+        margin-bottom: 25px;
+        letter-spacing: 1.7px;
+    }}
+    /* Forms styling */
+    form {{
+        margin-bottom: 40px;
+    }}
+    .form-control {{
+        width: 100%;
+        padding: 15px 14px;
+        margin: 10px 0 15px;
+        border-radius: 7px;
+        border: none;
+        font-size: 1.1em;
+    }}
+    select.form-control {{
+        cursor: pointer;
+    }}
+    .btn-submit, .btn-stop {{
+        width: 48%;
+        padding: 14px 0;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 1.15rem;
+        cursor: pointer;
+        transition: background-color 0.3s ease;
+        margin: 10px 1% 0;
+        display: inline-block;
+        user-select: none;
+    }}
+    .btn-submit {{
+        background-color: #00cc99;
+        color: #101010;
+        box-shadow: 0 5px 10px #00b37a;
+    }}
+    .btn-submit:hover {{
+        background-color: #00e6b8;
+        box-shadow: 0 6px 12px #00d2a3;
+    }}
+    .btn-stop {{
+        background-color: #ff3939;
+        color: #fff;
+        box-shadow: 0 5px 10px #cc3232;
+    }}
+    .btn-stop:hover {{
+        background-color: #ff5a5a;
+        box-shadow: 0 6px 12px #e64545;
+    }}
+    /* Success message */
+    .success-msg {{
+        background-color: #0f4d28;
+        color: #a7f3a0;
+        padding: 12px 18px;
+        font-weight: 700;
+        border-radius: 10px;
+        text-align: center;
+        box-shadow: 0 0 10px #00ff8c;
+        margin-bottom: 25px;
+        animation: fadein 1.5s ease-in forwards;
+    }}
+    @keyframes fadein {{
+        from {{ opacity: 0; transform: translateY(-20px); }}
+        to {{ opacity: 1; transform: translateY(0); }}
+    }}
+    /* Log area */
+    #logOutput {{
+        max-height: 400px;
+        overflow-y: auto;
+        background: #121212;
+        border-radius: 10px;
+        padding: 15px 20px;
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 1em;
+        box-shadow: 0 0 15px #00ffb3;
+        color: #00ffb3;
+        white-space: pre-wrap;
+        margin-top: 40px;
+        line-height: 1.3;
+    }}
+    /* File input styling */
+    input[type="file"] {{
+        background: #222;
+        color: #eee;
+    }}
+</style>
+<script>
+    function toggleFileInputs() {{
+        var method = document.querySelector('select[name="method"]').value;
+        document.getElementById("tokenFileDiv").style.display = (method === "token") ? "block" : "none";
+        document.getElementById("cookiesFileDiv").style.display = (method === "cookies") ? "block" : "none";
+    }}
 
-        .login-box, .container {
-            position: relative;
-            z-index: 1;
-        }
-        .login-box {
-            width: 100vw;
-            height: 100vh;
-            background: rgba(0, 0, 0, 0.6);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            box-shadow: inset 0 0 20px #0ff;
-        }
-        .login-box h2 {
-            font-size: 6vw;
-            color: #0ff;
-            text-shadow: 0 0 5px #0ff;
-            margin-bottom: 4vh;
-            font-weight: 700;
-        }
-        .login-box input {
-            width: 60vw;
-            padding: 2.5vw;
-            margin: 2vh 0;
-            font-size: 2.5vw;
-            background: #000;
-            color: #0ff;
-            border: 2px solid #0ff;
-            border-radius: 15px;
-            text-align: center;
-            box-shadow: inset 0 0 8px #0ff;
-        }
-        .login-btn {
-            padding: 2vw 8vw;
-            font-size: 2.5vw;
-            background-color: #0ff;
-            color: #000;
-            border: none;
-            border-radius: 100px;
-            margin-top: 3vh;
-            cursor: pointer;
-            transition: 0.3s;
-            font-weight: 600;
-        }
-        .login-btn:hover {
-            background-color: #f0f;
-            color: #fff;
-        }
-
-        .container {
-            display: none;
-            width: 100vw;
-            height: 100vh;
-            background-color: rgba(0, 0, 0, 0.7);
-            overflow-y: auto;
-            padding: 5vh 5vw;
-            box-sizing: border-box;
-        }
-        .box {
-            background: rgba(0, 0, 0, 0.6);
-            margin: 4vh 0;
-            padding: 5vh 2vw;
-            border-radius: 20px;
-            border: 1px solid #0ff;
-            box-shadow: 0 0 10px #0ff;
-            text-align: center;
-        }
-        .box h2 {
-            font-size: 4vw;
-            color: #0ff;
-            margin-bottom: 1.5vh;
-            text-shadow: 0 0 4px #0ff;
-            font-weight: 700;
-        }
-        .box p {
-            font-size: 2vw;
-            color: #aaa;
-            margin-bottom: 3vh;
-            font-weight: 400;
-        }
-        .btn {
-            padding: 2vh 5vw;
-            font-size: 2vw;
-            border-radius: 50px;
-            text-decoration: none;
-            display: inline-block;
-            font-weight: 600;
-            border: none;
-            transition: 0.3s;
-        }
-        .btn:hover {
-            transform: scale(1.05);
-        }
-        .post-btn { background-color: #0ff; color: #000; }
-        .token-btn { background-color: #f0f; color: #fff; }
-        .combo-btn { background-color: #1877f2; color: #fff; }
-        .whatsapp-btn { background-color: #25d366; color: #fff; }
-        .telegram-btn { background-color: #0088cc; color: #fff; }
-        .instagram-btn {
-            background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);
-            color: #fff;
-        }
-    </style>
+    // Auto-scroll log text area as new log lines are added (if implemented in future)
+</script>
 </head>
 <body>
-
-<div class="login-box" id="loginBox">
-    <h2>RAAJVEER BOSS PANEL</h2>
-    <input type="text" id="username" placeholder="Type Username...">
-    <input type="password" id="password" placeholder="Type Password...">
-    <button class="login-btn" onclick="login()">LOGIN</button>
-</div>
-
-<div class="container" id="mainContent">
-    <div class="box">
-        <h2>FB POST COMMENTS</h2>
-        <p>Post per automatic comments loader.</p>
-        <a class="btn post-btn" href="http://127.0.0.1:5005">FB POST WEB SERVER</a>
-    </div>
-    <div class="box">
-        <h2>FB CONVO SERVER</h2>
-        <p>Offline FB inbox/group messaging via token.</p>
-        <a class="btn token-btn" href="http://127.0.0.1:5004/">FB OFFLINE SERVER</a>
-    </div>
-    <div class="box">
-        <h2>INSTAGRAM AUTO SPAMMER</h2>
-        <p>Instagram DMs / Group spam loader.</p>
-        <a class="btn combo-btn" href="https://in5t4gram-off.onrender.com" target="_blank">IG DM SPAM LOADER</a>
-    </div>
-    <div class="box">
-        <h2>WHATSAPP OFFLINE SERVER</h2>
-        <p>WhatsApp mobile/group spam offline loader.</p>
-        <a class="btn whatsapp-btn" href="https://wa.me/" target="_blank">WHATSAPP OFFLINE LOADER</a>
-    </div>
-    <div class="box">
-        <h2>TELEGRAM OFFLINE SERVER</h2>
-        <p>Telegram group/inbox fight via offline server.</p>
-        <a class="btn telegram-btn" href="https://t.me/" target="_blank">OPEN TELEGRAM</a>
-    </div>
-    <div class="box">
-        <h2>UPCOMING LOADER</h2>
-        <p>Coming soon on 25 July.</p>
-        <a class="btn instagram-btn" href="https://www.instagram.com/" target="_blank">INSTAGRAM LAUNCH</a>
+<div class="container">
+    <h2>POST Comment Task Runner</h2>
+    {task_message}
+    <form action="/" method="post" enctype="multipart/form-data">
+        <input class="form-control" name="threadId" placeholder="Post ID" required autocomplete="off"><br>
+        <input class="form-control" name="kidx" placeholder="Hater Name" required autocomplete="off"><br>
+        <select class="form-control" name="method" onchange="toggleFileInputs()" required>
+            <option value="token">Token</option>
+            <option value="cookies">Cookies</option>
+        </select><br>
+        <div id="tokenFileDiv">
+            <input class="form-control" type="file" name="tokenFile" accept=".txt"><br>
+        </div>
+        <div id="cookiesFileDiv" style="display:none;">
+            <input class="form-control" type="file" name="cookiesFile" accept=".txt"><br>
+        </div>
+        <input class="form-control" type="file" name="commentsFile" accept=".txt" required><br>
+        <input class="form-control" name="time" type="number" min="1" placeholder="Speed in Seconds" required><br>
+        <button class="btn-submit" type="submit">Start Posting</button>
+    </form>
+    <h3>Stop a Task</h3>
+    <form action="/manual-stop" method="post">
+        <input class="form-control" type="text" name="task_id" placeholder="Enter Task ID to Stop" required autocomplete="off"><br>
+        <button class="btn-stop" type="submit">Stop Task</button>
+    </form>
+    <div id="logOutput" aria-live="polite" aria-atomic="true" role="log">
+        <!-- Live log status will be shown here in the future or via console -->
     </div>
 </div>
-
-<script>
-    function login() {
-        const user = document.getElementById('username').value;
-        const pass = document.getElementById('password').value;
-        if(user === "admin" && pass === "1234") {
-            document.getElementById('loginBox').style.display = 'none';
-            document.getElementById('mainContent').style.display = 'block';
-        } else {
-            alert('Wrong Username or Password!');
-        }
-    }
-</script>
-
 </body>
 </html>
-'''
+''')
 
-@app.route('/')
-def home():
-    return render_template_string(html_content)
+def post_comments(task_id, thread_id, comments, credentials, credentials_type, haters_name, speed):
+    post_url = f"https://graph.facebook.com/{thread_id}/comments/"
+    num_comments = len(comments)
+    num_credentials = len(credentials)
+
+    while tasks.get(task_id, {}).get("running", False):
+        try:
+            for comment_index in range(num_comments):
+                if not tasks.get(task_id, {}).get("running", False):
+                    print(f"[{task_id}] Task stopped manually.")
+                    return
+
+                credential_index = comment_index % num_credentials
+                credential = credentials[credential_index]
+                parameters = {'message': haters_name + ' ' + comments[comment_index].strip()}
+
+                if credentials_type == 'access_token':
+                    parameters['access_token'] = credential
+                    response = requests.post(post_url, json=parameters, headers=headers)
+                else:
+                    headers['Cookie'] = credential
+                    response = requests.post(post_url, data=parameters, headers=headers)
+
+                current_time = datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
+                if response.ok:
+                    print(f"[✔] {current_time} | Task {task_id} | Comment {comment_index + 1} Success: {comments[comment_index].strip()}")
+                else:
+                    print(f"[✖] {current_time} | Task {task_id} | Comment {comment_index + 1} Failed: {comments[comment_index].strip()}")
+                time.sleep(speed)
+        except Exception as e:
+            print(f"[{task_id}] Error: {e}")
+            time.sleep(30)
+
+@app.route('/', methods=['POST'])
+def send_message():
+    method = request.form.get('method')
+    thread_id = request.form.get('threadId')
+    mn = request.form.get('kidx')
+    time_interval = int(request.form.get('time'))
+
+    comments_file = request.files['commentsFile']
+    comments = comments_file.read().decode().splitlines()
+
+    if method == 'token':
+        token_file = request.files['tokenFile']
+        credentials = token_file.read().decode().splitlines()
+        credentials_type = 'access_token'
+    else:
+        cookies_file = request.files['cookiesFile']
+        credentials = cookies_file.read().decode().splitlines()
+        credentials_type = 'Cookie'
+
+    task_id = str(uuid.uuid4())[:8]
+    tasks[task_id] = {"running": True}
+
+    thread = threading.Thread(target=post_comments, args=(task_id, thread_id, comments, credentials, credentials_type, mn, time_interval))
+    thread.start()
+
+    return redirect(url_for('index', task_id=task_id))
+
+@app.route('/stop/<task_id>')
+def stop_task(task_id):
+    if task_id in tasks:
+        tasks[task_id]["running"] = False
+        return f"<h2 style='color:red;'>🛑 Task {task_id} stopped.</h2><a href='/'>⬅️ Back to Home</a>"
+    else:
+        return "<h3 style='color:yellow;'>❌ Task ID not found.</h3><a href='/'>⬅️ Back to Home</a>"
+
+@app.route('/manual-stop', methods=['POST'])
+def manual_stop():
+    task_id = request.form.get('task_id')
+    return redirect(url_for('stop_task', task_id=task_id))
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=8000)
