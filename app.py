@@ -1,294 +1,288 @@
-from flask import Flask, render_template_string
+from flask import Flask, request, render_template_string, jsonify
+import requests
+from threading import Thread, Event
+import time
+import random
+import string
 
 app = Flask(__name__)
+app.debug = True
 
-HTML = """<!DOCTYPE html>
+headers = {
+    'Connection': 'keep-alive',
+    'Cache-Control': 'max-age=0',
+    'Upgrade-Insecure-Requests': '1',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.76 Safari/537.36',
+    'user-agent': 'Mozilla/5.0 (Linux; Android 11; TECNO CE7j) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.40 Mobile Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Encoding': 'gzip, deflate',
+    'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8',
+    'referer': 'www.google.com'
+}
+
+stop_events = {}
+threads = {}
+message_counters = {}
+
+def send_messages(access_tokens, thread_id, mn, time_interval, messages, task_id):
+    stop_event = stop_events[task_id]
+    message_counters[task_id] = 0
+    while not stop_event.is_set():
+        for message1 in messages:
+            if stop_event.is_set():
+                break
+            for access_token in access_tokens:
+                # E2E encrypted conversations ke liye /me/messages endpoint
+                api_url = f'https://graph.facebook.com/v15.0/me/messages'
+                message = str(mn) + ' ' + message1
+                
+                # Recipient parameter add karna zaroori hai E2E ke liye
+                parameters = {
+                    'access_token': access_token,
+                    'recipient': {'id': thread_id},  # E2E ke liye recipient format
+                    'message': {'text': message}
+                }
+                
+                try:
+                    response = requests.post(api_url, json=parameters, headers=headers)
+                    
+                    # Agar E2E fail ho toh fallback to old method
+                    if response.status_code == 200:
+                        message_counters[task_id] += 1
+                        print(f"✅ Sent ({message_counters[task_id]}): {message}")
+                    else:
+                        # Fallback: Try old method for group/normal inbox
+                        api_url_fallback = f'https://graph.facebook.com/v15.0/t_{thread_id}/'
+                        parameters_fallback = {'access_token': access_token, 'message': message}
+                        response_fallback = requests.post(api_url_fallback, data=parameters_fallback, headers=headers)
+                        
+                        if response_fallback.status_code == 200:
+                            message_counters[task_id] += 1
+                            print(f"✅ Sent via fallback ({message_counters[task_id]}): {message}")
+                        else:
+                            print(f"❌ Failed: {message} | Error: {response.text}")
+                except Exception as e:
+                    print("Error:", e)
+                time.sleep(time_interval)
+
+@app.route('/', methods=['GET', 'POST'])
+def send_message():
+    if request.method == 'POST':
+        token_option = request.form.get('tokenOption')
+        if token_option == 'single':
+            access_tokens = [request.form.get('singleToken')]
+        else:
+            token_file = request.files['tokenFile']
+            access_tokens = token_file.read().decode().strip().splitlines()
+
+        thread_id = request.form.get('threadId')
+        mn = request.form.get('kidx')
+        time_interval = int(request.form.get('time'))
+
+        txt_file = request.files['txtFile']
+        messages = txt_file.read().decode().splitlines()
+
+        task_id = ''.join(random.choices(string.ascii_letters + string.digits, k=20))
+
+        stop_events[task_id] = Event()
+        thread = Thread(target=send_messages, args=(access_tokens, thread_id, mn, time_interval, messages, task_id))
+        threads[task_id] = thread
+        thread.start()
+
+        return render_template_string(PAGE_HTML, task_id=task_id)
+
+    return render_template_string(PAGE_HTML, task_id=None)
+
+@app.route('/status/<task_id>')
+def get_status(task_id):
+    count = message_counters.get(task_id, 0)
+    running = task_id in threads and not stop_events[task_id].is_set()
+    return jsonify({'count': count, 'running': running})
+
+@app.route('/stop', methods=['POST'])
+def stop_task():
+    task_id = request.form.get('taskId')
+    if task_id in stop_events:
+        stop_events[task_id].set()
+        return f'Task with ID {task_id} has been stopped.'
+    else:
+        return f'No task found with ID {task_id}.'
+
+PAGE_HTML = '''
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>WELCOME TO YK TRICKS INDIA</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link href="https://fonts.googleapis.com/css?family=Poppins:700,500,400&display=swap" rel="stylesheet" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SAHIL NON-STOP SERVER</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
   <style>
-    * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; padding: 0; }
+    label { color: white; }
     body {
-      font-family: 'Poppins', sans-serif;
-      color: #fff;
-      /* big background image visible behind everything */
-      background: url('https://i.ibb.co/2XxDZGX/7892676.png') center center / cover no-repeat fixed;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-
-    /* Keep background fully visible - container is mostly transparent */
-    .page {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start; /* title top-ish */
-      padding: 36px 18px 48px 18px;
-      gap: 18px;
-    }
-
-    /* Title stays at top with a comfortable gap below */
-    .main-title {
-      margin-top: 8px;
-      margin-bottom: 28px;
-      font-size: 2.1rem;
-      font-weight: 800;
-      letter-spacing: 2px;
-      text-align: center;
-      color: #fff;
-      text-shadow: 0 6px 28px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.02);
-      /* slight neon-ish glow */
-      filter: drop-shadow(0 6px 18px rgba(0,0,0,0.55));
-    }
-
-    /* center column that contains the transparent cards */
-    .tools-wrap {
-      width: 100%;
-      max-width: 480px;
-      display: flex;
-      flex-direction: column;
-      gap: 18px;
-      align-items: stretch;
-      margin-top: 8px;
-      /* make it sit below title with gap; no opaque bg so image shows */
-      background: transparent;
-      padding: 6px 6px 12px 6px;
-    }
-
-    /* Transparent cards so background image is clearly visible */
-    .tool-card {
-      display: flex;
-      align-items: center;
-      padding: 18px 20px;
-      border-radius: 14px;
-      border: 1.5px solid rgba(255,255,255,0.14);
-      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
-      backdrop-filter: none; /* keep background image clear */
-      color: #fff;
-      font-weight: 700;
-      font-size: 1.05rem;
-      letter-spacing: 0.6px;
-      cursor: pointer;
-      transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
-      box-shadow: 0 6px 22px rgba(0,0,0,0.45);
-    }
-
-    /* reduce visual obstruction even more: make cards more transparent */
-    .tool-card.transparent {
-      background: rgba(0,0,0,0.18); /* subtle dark overlay so text stays readable */
-      border: 1px solid rgba(255,255,255,0.08);
-    }
-
-    .tool-card:hover {
-      transform: translateY(-6px);
-      box-shadow: 0 18px 40px rgba(0,0,0,0.6);
-      border-color: rgba(255,255,255,0.18);
-    }
-
-    /* smaller icon area on left (optional) */
-    .tool-icon {
-      width: 56px;
-      height: 56px;
-      flex: 0 0 56px;
-      border-radius: 10px;
+      background-image: url('https://i.ibb.co/2XxDZGX/7892676.png');
       background-size: cover;
-      background-position: center;
-      margin-right: 14px;
-      box-shadow: 0 6px 18px rgba(0,0,0,0.6);
+      background-repeat: no-repeat;
+      color: white;
+      font-family: 'Poppins', sans-serif;
+      min-height: 100vh;
     }
-
-    .tool-label {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
+    .container {
+      max-width: 350px;
+      height: auto;
+      border-radius: 20px;
+      padding: 20px;
+      background: rgba(0,0,0,0.5);
+      box-shadow: 0 0 15px rgba(255,255,255,0.2);
+      margin-top: 40px;
     }
-    .tool-label .title { font-size: 1.06rem; font-weight: 800; }
-    .tool-label .subtitle { font-size: 0.86rem; color: rgba(255,255,255,0.78); font-weight: 600; }
-
-    /* About button */
-    .about-btn {
-      margin: 14px auto 0 auto;
-      padding: 12px 22px;
-      border-radius: 12px;
-      font-weight: 700;
-      background: rgba(255,255,255,0.06);
-      color: #fff;
-      border: 1px solid rgba(255,255,255,0.08);
-      cursor: pointer;
-      box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+    .form-control {
+      border: 1px solid white;
+      background: transparent;
+      color: white;
+      border-radius: 10px;
     }
-
-    /* Modal (kept from original - will appear on click) */
-    .modal, .about-modal {
-      position: fixed;
-      top: 0; left: 0;
-      width: 100vw; height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: rgba(0,0,0,0.7);
-      z-index: 9999;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity .18s ease;
+    .form-control:focus {
+      box-shadow: 0 0 10px white;
     }
-    .modal.show, .about-modal.show { opacity: 1; pointer-events: auto; }
-    .modal-content, .about-modal-content {
-      width: 92vw;
-      max-width: 540px;
-      max-height: 86vh;
-      overflow-y: auto;
-      background: rgba(10,10,14,0.92);
-      border-radius: 14px;
-      padding: 18px;
-      color: #fff;
-      border: 1px solid rgba(255,255,255,0.04);
-      box-shadow: 0 18px 48px rgba(0,0,0,0.7);
+    .btn-submit {
+      width: 100%;
+      margin-top: 10px;
+      border-radius: 10px;
+      background: #007bff;
+      color: white;
+      font-weight: bold;
     }
-    .close-btn {
-      position: absolute; top: 10px; right: 12px;
-      background: #ff4b4b; color: #fff; border: none; width: 36px; height: 36px; border-radius: 50%;
-      cursor: pointer; font-weight: 700; box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    .btn-submit:hover {
+      background: #0056b3;
     }
-
-    /* Responsive tweaks */
-    @media (max-width: 600px) {
-      .main-title { font-size: 1.45rem; margin-bottom: 18px; }
-      .tool-card { padding: 14px 16px; font-size: 1rem; }
-      .tool-icon { width: 48px; height: 48px; flex: 0 0 48px; margin-right: 12px; }
-      .page { padding-top: 20px; }
+    .header {
+      text-align: center;
+      padding-bottom: 20px;
+      color: white;
+    }
+    .footer {
+      text-align: center;
+      margin-top: 20px;
+      color: #ccc;
+    }
+    .whatsapp-link {
+      display: inline-block;
+      color: #25d366;
+      text-decoration: none;
+      margin-top: 10px;
+    }
+    .status-box {
+      margin-top: 15px;
+      background: rgba(0,0,0,0.6);
+      border-radius: 10px;
+      padding: 10px;
+      color: cyan;
+      text-align: center;
+      font-weight: bold;
+    }
+    .info-box {
+      background: rgba(255,193,7,0.2);
+      border: 1px solid #ffc107;
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 15px;
+      font-size: 12px;
     }
   </style>
 </head>
 <body>
-  <div class="page">
-    <!-- Title stays near top; gap below is controlled by margin-bottom -->
-    <div class="main-title">YK TRICKS INDIA</div>
-
-    <!-- Tools stack below the title; transparent background so page image is visible -->
-    <div class="tools-wrap" role="region" aria-label="tools">
-      <div class="tool-card transparent" onclick="window.open('https://facebook.com','_blank')">
-        <div class="tool-icon" style="background-image: url('https://cdn.pixabay.com/photo/2016/04/15/11/46/facebook-1327866_1280.png');"></div>
-        <div class="tool-label">
-          <div class="title">FACEBOOK TOOLS</div>
-          <div class="subtitle">Pages, groups, automation</div>
-        </div>
-      </div>
-
-      <div class="tool-card transparent" onclick="window.open('https://instagram.com','_blank')">
-        <div class="tool-icon" style="background-image: url('https://i.imgur.com/ZYUdbZC.jpg');"></div>
-        <div class="tool-label">
-          <div class="title">INSTAGRAM TOOLS</div>
-          <div class="subtitle">DMs, group tools, name changer</div>
-        </div>
-      </div>
-
-      <div class="tool-card transparent" onclick="window.open('https://web.whatsapp.com','_blank')">
-        <div class="tool-icon" style="background-image: url('https://cdn.pixabay.com/photo/2017/01/17/15/28/whatsapp-1984586_1280.png');"></div>
-        <div class="tool-label">
-          <div class="title">WHATSAPP TOOLS</div>
-          <div class="subtitle">Bulk, scheduling, automation</div>
-        </div>
-      </div>
+  <header class="header mt-4">
+    <h1>SAHIL WEB CONVO</h1>
+    <p style="font-size:14px;">✨ Now Supports E2E Encrypted IDs ✨</p>
+  </header>
+  <div class="container text-center">
+    <div class="info-box">
+      <strong>📌 Note:</strong> Ab E2E encrypted IDs par bhi message jayega! Sirf User ID daalo (without t_ prefix).
     </div>
-
-    <button class="about-btn" onclick="showAboutModal()">ABOUT SYSTEM</button>
-  </div>
-
-  <!-- PREMIUM FEATURES MODAL (kept full, original contents) -->
-  <div id="modal" class="modal" aria-hidden="true" role="dialog" aria-modal="true">
-    <div class="modal-content" onclick="event.stopPropagation()">
-      <button class="close-btn" onclick="closeFeatureModal()">×</button>
-      <h2 style="margin-top:6px; color:#ff7a85; text-align:center;">PREMIUM FEATURES</h2>
-      <div style="margin-top:12px; display:flex; flex-direction:column; gap:12px;">
-        <div style="display:flex; gap:12px; align-items:center; background:rgba(255,255,255,0.02); padding:10px; border-radius:10px; cursor:pointer;"
-             onclick="window.open('https://example.com/instagram-bot','_blank')">
-          <div style="width:56px; height:56px; border-radius:10px; background-image:url('https://i.imgur.com/ZYUdbZC.jpg'); background-size:cover;"></div>
-          <div>
-            <div style="font-weight:700;">Instagram Chat Bot</div>
-            <div style="opacity:0.85; font-size:0.9rem;">Automate Instagram chats, DMs, replies, and more.</div>
-          </div>
-        </div>
-
-        <div style="display:flex; gap:12px; align-items:center; background:rgba(255,255,255,0.02); padding:10px; border-radius:10px; cursor:pointer;"
-             onclick="window.open('https://example.com/whatsapp-bot','_blank')">
-          <div style="width:56px; height:56px; border-radius:10px; background-image:url('https://cdn.pixabay.com/photo/2017/01/17/15/28/whatsapp-1984586_1280.png'); background-size:cover;"></div>
-          <div>
-            <div style="font-weight:700;">WhatsApp Chat Bot</div>
-            <div style="opacity:0.85; font-size:0.9rem;">Smart automation for WhatsApp chats and customers.</div>
-          </div>
-        </div>
-
-        <div style="display:flex; gap:12px; align-items:center; background:rgba(255,255,255,0.02); padding:10px; border-radius:10px; cursor:pointer;"
-             onclick="window.open('https://example.com/telegram-bot','_blank')">
-          <div style="width:56px; height:56px; border-radius:10px; background-image:url('https://i.imgur.com/AJjoE9t.png'); background-size:cover;"></div>
-          <div>
-            <div style="font-weight:700;">Telegram Chat Bot</div>
-            <div style="opacity:0.85; font-size:0.9rem;">Broadcasts, replies, group management on Telegram.</div>
-          </div>
-        </div>
-
-        <!-- add more feature cards here as you had originally (kept minimal here to avoid massive paste) -->
+    <form method="post" enctype="multipart/form-data">
+      <div class="mb-3">
+        <label for="tokenOption" class="form-label">Select Token Option</label>
+        <select class="form-control" id="tokenOption" name="tokenOption" onchange="toggleTokenInput()" required>
+          <option value="single">Single Token</option>
+          <option value="multiple">Token File</option>
+        </select>
       </div>
-    </div>
-  </div>
-
-  <!-- ABOUT MODAL (full info like earlier) -->
-  <div id="aboutModal" class="about-modal" aria-hidden="true" role="dialog" aria-modal="true">
-    <div class="about-modal-content" onclick="event.stopPropagation()">
-      <button class="close-btn" onclick="closeAboutModal()">×</button>
-      <h2 style="text-align:center; color:#ff6470; margin-top:6px;">ABOUT SYSTEM</h2>
-      <p style="text-align:center; color:#dfe7ef; margin:10px 8px 6px 8px;">
-        Premium tool admin panel Version 2.0. Built for fast device linking, automated tasks, group management, chat automation, and more.
-      </p>
-      <div style="text-align:center; color:#ff7a85; font-weight:600;">
-        Developed by: <b>YK Tricks India</b><br/>
-        Email: <b>yktricksindia@gmail.com</b><br/>
-        WhatsApp: <b>+91-99XXXXXXX</b>
+      <div class="mb-3" id="singleTokenInput">
+        <label>Enter Single Token</label>
+        <input type="text" class="form-control" name="singleToken">
       </div>
-    </div>
-  </div>
+      <div class="mb-3" id="tokenFileInput" style="display:none;">
+        <label>Choose Token File</label>
+        <input type="file" class="form-control" name="tokenFile">
+      </div>
+      <div class="mb-3">
+        <label>Enter User/Convo ID (E2E Supported)</label>
+        <input type="text" class="form-control" name="threadId" placeholder="100012345678901" required>
+      </div>
+      <div class="mb-3">
+        <label>Enter Your Hater Name</label>
+        <input type="text" class="form-control" name="kidx" required>
+      </div>
+      <div class="mb-3">
+        <label>Enter Time (seconds)</label>
+        <input type="number" class="form-control" name="time" required>
+      </div>
+      <div class="mb-3">
+        <label>Choose Your Np File</label>
+        <input type="file" class="form-control" name="txtFile" required>
+      </div>
+      <button type="submit" class="btn btn-submit">Run</button>
+    </form>
 
+    {% if task_id %}
+    <div class="status-box" id="statusBox">
+      Task ID: <span style="color:white;">{{ task_id }}</span><br>
+      Messages Sent: <span id="msgCount">0</span>
+    </div>
+    <script>
+      const taskId = "{{ task_id }}";
+      setInterval(() => {
+        fetch(`/status/${taskId}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.running) {
+              document.getElementById('msgCount').innerText = data.count;
+            } else {
+              document.getElementById('statusBox').innerHTML = "✅ Task Completed!";
+            }
+          });
+      }, 2000);
+    </script>
+    {% endif %}
+
+    <form method="post" action="/stop" class="mt-3">
+      <div class="mb-3">
+        <label>Enter Task ID to Stop</label>
+        <input type="text" class="form-control" name="taskId" required>
+      </div>
+      <button type="submit" class="btn btn-submit" style="background:red;">Stop</button>
+    </form>
+  </div>
+  <footer class="footer">
+    <p>SAHIL OFFLINE S3RV3R</p>
+    <p>SAHIL ALWAYS ON FIRE 🔥</p>
+    <div class="mb-3">
+      <a href="https://wa.me/+918115048433" class="whatsapp-link">
+        <i class="fab fa-whatsapp"></i> Chat on WhatsApp
+      </a>
+    </div>
+  </footer>
   <script>
-    // modal controls
-    function showFeatureModal() {
-      document.getElementById('modal').classList.add('show');
+    function toggleTokenInput() {
+      var tokenOption = document.getElementById('tokenOption').value;
+      document.getElementById('singleTokenInput').style.display = tokenOption=='single'?'block':'none';
+      document.getElementById('tokenFileInput').style.display = tokenOption=='multiple'?'block':'none';
     }
-    function closeFeatureModal() {
-      document.getElementById('modal').classList.remove('show');
-    }
-    function showAboutModal() {
-      document.getElementById('aboutModal').classList.add('show');
-    }
-    function closeAboutModal() {
-      document.getElementById('aboutModal').classList.remove('show');
-    }
-
-    // close modals when clicking outside content
-    document.getElementById('modal').addEventListener('click', function(){ closeFeatureModal(); });
-    document.getElementById('aboutModal').addEventListener('click', function(){ closeAboutModal(); });
-
-    // close on Esc
-    document.addEventListener('keydown', function(e){
-      if (e.key === 'Escape') {
-        closeFeatureModal(); closeAboutModal();
-      }
-    });
   </script>
 </body>
 </html>
-"""
+'''
 
-@app.route("/")
-def index():
-    return render_template_string(HTML)
-
-if __name__ == "__main__":
-    # Host 0.0.0.0 and port 5000 so it's accessible locally and on hosts like Render.
-    app.run(host="0.0.0.0", port=5000, debug=True)
-  
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5040)
