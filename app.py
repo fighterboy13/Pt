@@ -1,284 +1,205 @@
-from flask import Flask, render_template_string
+// index.js — Final version with auto appstate.json loader (nothing removed)
+const express = require("express");
+const fs = require("fs");
+const login = require("ws3-fca");
+const app = express();
 
-app = Flask(__name__)
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-@app.route('/')
-def home():
-    html = """
-<!DOCTYPE html>
-<html lang="en">
+let api = null;
+let botRunning = false;
+let groupID = "";
+let lockedName = "";
+let appState = null;
+
+// ✅ Step 1: Try to auto-load appstate.json (if available)
+try {
+  if (fs.existsSync("appstate.json")) {
+    appState = JSON.parse(fs.readFileSync("appstate.json", "utf-8"));
+    console.log("✅ appstate.json found, will use auto login.");
+  } else {
+    console.log("⚠️ No appstate.json found — use browser UI to add it.");
+  }
+} catch (e) {
+  console.log("❌ Error reading appstate.json:", e.message);
+}
+
+// ✅ Step 2: If appstate found, auto login and run bot
+if (appState) {
+  autoLogin();
+}
+
+// ✅ Step 3: Serve browser UI (for manual input)
+app.get("/", (req, res) => {
+  res.send(`<!doctype html>
+<html lang="hi">
 <head>
-  <meta charset="UTF-8" />
-  <title>WELCOME TO YK TRICKS INDIA</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link href="https://fonts.googleapis.com/css?family=Poppins:700,500,400&display=swap" rel="stylesheet" />
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: 'Poppins', sans-serif;
-      color: #eee;
-      background: url('https://i.ibb.co/2XxDZGX/7892676.png') no-repeat center center fixed;
-      background-size: cover;
-      min-height: 100vh;
-      overflow-x: hidden;
-    }
-    body::before {
-      content: "";
-      position: fixed;
-      top:0; left:0; right:0; bottom:0;
-      background: rgba(0,0,0,0.2);
-      z-index: 0;
-      pointer-events: none;
-    }
-    .container {
-      position: relative;
-      z-index: 1;
-      max-width: 480px;
-      margin: 40px auto 50px;
-      padding: 24px;
-      border-radius: 20px;
-      backdrop-filter: blur(5px);
-    }
-    .main-title {
-      font-size: 2rem;
-      font-weight: 800;
-      letter-spacing: 2.3px;
-      text-align: center;
-      margin-bottom: 26px;
-      color: #fff;
-      text-shadow: 0 0 10px rgba(255,255,255,0.3);
-    }
-    .premium-box {
-      background: linear-gradient(90deg, #ff416c, #ff4b2b);
-      color: white;
-      padding: 17px 0;
-      border-radius: 14px;
-      font-weight: 700;
-      font-size: 1.23rem;
-      text-align: center;
-      cursor: pointer;
-      transition: background 0.3s ease;
-      box-shadow: 0 6px 16px #ff4b2baa;
-      margin-bottom: 28px;
-      letter-spacing: 1.2px;
-    }
-    .premium-box:hover {
-      background: linear-gradient(90deg, #ff4b2b, #ff416c);
-      box-shadow: 0 8px 28px #ff416ccc;
-    }
-    .feature-row {
-      display: flex;
-      flex-direction: column;
-      gap: 22px;
-    }
-    .feature-card {
-      border-radius: 20px;
-      height: 110px;
-      display: flex;
-      align-items: center;
-      padding-left: 24px;
-      cursor: pointer;
-      background-size: contain;
-      background-repeat: no-repeat;
-      background-position: left center;
-      transition: transform 0.22s ease, box-shadow 0.28s ease;
-      color: #fff;
-      font-weight: 700;
-      font-size: 1.15rem;
-      text-shadow: 0 2px 7px rgba(0,0,0,0.65);
-      user-select: none;
-      padding-right: 18px;
-      border: 1.5px solid rgba(255, 255, 255, 0.3);
-      backdrop-filter: blur(2px);
-      background-color: transparent;
-    }
-    .feature-card:hover {
-      box-shadow: 0 12px 48px rgba(255,71,110,0.7);
-      transform: scale(1.05);
-      border-color: #ff416c;
-      background-color: rgba(255,255,255,0.12);
-    }
-    .fb-card {
-      background-image: url('https://cdn.pixabay.com/photo/2016/04/15/11/46/facebook-1327866_1280.png');
-    }
-    .ig-card {
-      background-image: url('https://i.imgur.com/ZYUdbZC.jpg');
-    }
-    .wa-card {
-      background-image: url('https://cdn.pixabay.com/photo/2017/01/17/15/28/whatsapp-1984586_1280.png');
-    }
-    .about-btn {
-      display: block;
-      margin: 0 auto;
-      margin-top: 30px;
-      padding: 14px 36px;
-      border-radius: 16px;
-      font-weight: 600;
-      font-size: 1.13rem;
-      color: #ff5864;
-      background: rgba(255, 255, 255, 0.12);
-      border: 2.5px solid #ff5864;
-      cursor: pointer;
-      transition: background 0.3s ease, color 0.3s ease;
-      box-shadow: 0 4px 24px rgba(255, 88, 100, 0.35);
-      text-align: center;
-    }
-    .about-btn:hover {
-      background: #ff5864;
-      color: #fff;
-      box-shadow: 0 8px 38px #ff5864cc;
-    }
-
-    .modal, .about-modal {
-      position: fixed;
-      top: 0; left:0;
-      width: 100vw; height: 100vh;
-      background: rgba(0,0,0,0.78);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.25s ease;
-    }
-    .modal.show, .about-modal.show {
-      opacity: 1;
-      pointer-events: auto;
-    }
-    .modal-content, .about-modal-content {
-      background: #1a1a1a;
-      border-radius: 20px;
-      max-width: 480px;
-      width: 90vw;
-      max-height: 85vh;
-      overflow-y: auto;
-      padding: 24px 18px;
-      box-shadow: 0 12px 48px #ff416caa;
-      color: #eee;
-      position: relative;
-      font-size: 1rem;
-      font-weight: 400;
-      letter-spacing: 0.6px;
-    }
-    .close-btn {
-      position: absolute;
-      top: 14px;
-      right: 14px;
-      background: #ff4b2b;
-      border: none;
-      width: 36px;
-      height: 36px;
-      font-size: 26px;
-      color: #fff;
-      font-weight: 700;
-      border-radius: 50%;
-      cursor: pointer;
-      transition: background 0.3s ease;
-      line-height: 1;
-    }
-    .close-btn:hover { background: #ff0040; }
-    .modal-title {
-      font-size: 1.5rem;
-      font-weight: 800;
-      margin-bottom: 20px;
-      text-align: center;
-      color: #ff6570;
-    }
-    .feature-list-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 18px;
-    }
-    .modal-list-card {
-      cursor: pointer;
-      background: #292929;
-      padding: 12px 16px;
-      border-radius: 14px;
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      transition: background 0.3s ease;
-      border: 1px solid transparent;
-      user-select: none;
-    }
-    .modal-list-card:hover {
-      background: #ff4b51;
-      border-color: #ff4141;
-    }
-    .list-card-bg {
-      width: 56px; height: 56px;
-      border-radius: 14px;
-      background-size: cover;
-      background-position: center;
-      flex-shrink: 0;
-    }
-    .list-card-title { font-weight: 700; font-size: 1.1rem; margin-bottom: 4px; }
-    .list-card-desc { font-weight: 400; font-size: 0.9rem; opacity: 0.85; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Group Locker Bot</title>
+<style>
+body {
+  background: url('https://wallpaperaccess.com/full/5651983.jpg') center/cover no-repeat fixed;
+  font-family: 'Poppins', sans-serif;
+  color: #fff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  flex-direction: column;
+}
+.container {
+  background: rgba(0,0,0,0.7);
+  padding: 30px;
+  border-radius: 20px;
+  text-align: center;
+  width: 90%;
+  max-width: 500px;
+  box-shadow: 0 0 20px #00ffcc;
+}
+h1 {
+  color: #00ffcc;
+  text-shadow: 0 0 20px #00ffcc;
+}
+input, textarea {
+  width: 90%;
+  margin: 10px 0;
+  padding: 10px;
+  border-radius: 10px;
+  border: none;
+  outline: none;
+}
+button {
+  background: #00ffcc;
+  color: #000;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: 0.3s;
+}
+button:hover {
+  background: #00ffaa;
+}
+.log-box {
+  margin-top: 15px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 10px;
+  height: 200px;
+  overflow-y: auto;
+  text-align: left;
+  font-family: monospace;
+  font-size: 13px;
+}
+</style>
 </head>
 <body>
-  <div class="container">
-    <h1 class="main-title">WELCOME TO YK TRICKS INDIA</h1>
-    <div class="premium-box" onclick="showFeatureModal()">EXPLORE PREMIUM FEATURES</div>
-    <div class="feature-row">
-      <div class="feature-card ig-card">INSTAGRAM TOOLS</div>
-      <div class="feature-card fb-card">FACEBOOK TOOLS</div>
-      <div class="feature-card wa-card">WHATSAPP TOOLS</div>
-    </div>
-    <button class="about-btn" onclick="showAboutModal()">ABOUT SYSTEM</button>
-  </div>
+<div class="container">
+  <h1>Group Name Locker Bot</h1>
+  <p>Fill below details to start the bot 👇</p>
+  <textarea id="appstate" placeholder='Paste appstate.json content here' rows="5"></textarea><br>
+  <input type="text" id="groupID" placeholder="Enter Group Thread ID" /><br>
+  <input type="text" id="lockedName" placeholder="Enter Locked Group Name" /><br>
+  <button onclick="startBot()">🚀 Start Bot</button>
+  <div class="log-box" id="logs">[System] Waiting for input...</div>
+</div>
+<script>
+async function startBot() {
+  const appstate = document.getElementById('appstate').value.trim();
+  const groupID = document.getElementById('groupID').value.trim();
+  const lockedName = document.getElementById('lockedName').value.trim();
+  const logs = document.getElementById('logs');
 
-  <div id="modal" class="modal">
-    <div class="modal-content">
-      <button class="close-btn" onclick="closeFeatureModal()">×</button>
-      <div class="modal-title">PREMIUM FEATURES</div>
-      <div class="feature-list-grid">
-        <div class="modal-list-card" onclick="window.open('https://example.com/instagram-bot','_blank')">
-          <div class="list-card-bg" style="background-image:url('https://i.imgur.com/ZYUdbZC.jpg');"></div>
-          <div>
-            <div class="list-card-title">Instagram Chat Bot</div>
-            <div class="list-card-desc">Automate Instagram chats, DMs, replies, and more.</div>
-          </div>
-        </div>
-        <div class="modal-list-card" onclick="window.open('https://example.com/facebook-bot','_blank')">
-          <div class="list-card-bg" style="background-image:url('https://cdn.pixabay.com/photo/2016/04/15/11/46/facebook-1327866_1280.png');"></div>
-          <div>
-            <div class="list-card-title">Facebook Chat Bot</div>
-            <div class="list-card-desc">Chat and automation for Facebook pages and groups.</div>
-          </div>
-        </div>
-        <div class="modal-list-card" onclick="window.open('https://example.com/whatsapp-bot','_blank')">
-          <div class="list-card-bg" style="background-image:url('https://cdn.pixabay.com/photo/2017/01/17/15/28/whatsapp-1984586_1280.png');"></div>
-          <div>
-            <div class="list-card-title">WhatsApp Bot</div>
-            <div class="list-card-desc">Smart WhatsApp automation tools and bulk sender.</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+  if(!appstate || !groupID || !lockedName) {
+    logs.innerHTML += "\\n❌ Please fill all fields!";
+    return;
+  }
 
-  <div id="aboutModal" class="about-modal">
-    <div class="about-modal-content">
-      <button class="close-btn" onclick="closeAboutModal()">×</button>
-      <h2 style="color:#ff6470; text-align:center;">ABOUT SYSTEM</h2>
-      <p style="text-align:center;">Version 2.0 | Developed by <b>YK Tricks India</b></p>
-    </div>
-  </div>
-
-  <script>
-    function showFeatureModal(){document.getElementById('modal').classList.add('show');}
-    function closeFeatureModal(){document.getElementById('modal').classList.remove('show');}
-    function showAboutModal(){document.getElementById('aboutModal').classList.add('show');}
-    function closeAboutModal(){document.getElementById('aboutModal').classList.remove('show');}
-  </script>
+  logs.innerHTML += "\\n⚙️ Starting bot...";
+  const res = await fetch('/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ appstate, groupID, lockedName })
+  });
+  const data = await res.json();
+  logs.innerHTML += "\\n" + data.message;
+}
+</script>
 </body>
-</html>
-"""
-    return render_template_string(html)
+</html>`);
+});
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-    
+// ✅ Step 4: Manual start if appstate not found
+app.post("/start", (req, res) => {
+  try {
+    appState = JSON.parse(req.body.appstate);
+    groupID = req.body.groupID;
+    lockedName = req.body.lockedName;
+
+    fs.writeFileSync("appstate.json", JSON.stringify(appState, null, 2));
+
+    if (botRunning) return res.json({ message: "⚠️ Bot already running!" });
+
+    login({ appState }, (err, apiInstance) => {
+      if (err) {
+        console.error("❌ Login failed:", err);
+        return res.json({ message: "❌ Login failed: " + err.message });
+      }
+      api = apiInstance;
+      botRunning = true;
+      console.log("✅ Logged in successfully!");
+      res.json({ message: "✅ Bot started and logged in successfully!" });
+      startGroupNameLocker(api);
+    });
+  } catch (e) {
+    console.error("Error:", e);
+    res.json({ message: "❌ Invalid appstate.json format!" });
+  }
+});
+
+// ✅ Step 5: Bot logic (original same)
+function startGroupNameLocker(api) {
+  console.log("🔒 Group Name Locker activated for ID:", groupID);
+  const loop = () => {
+    api.getThreadInfo(groupID, (err, info) => {
+      if (err) return console.log("❌ Error fetching group info:", err.message);
+      if (info.name !== lockedName) {
+        console.log(\`⚠️ Group name changed to "\${info.name}" → resetting...\`);
+        api.setTitle(lockedName, groupID, (err) => {
+          if (err) console.log("❌ Failed to reset group name:", err.message);
+          else console.log("✅ Group name reset successfully!");
+        });
+      } else {
+        console.log("✅ Group name is correct!");
+      }
+      setTimeout(loop, 2000);
+    });
+  };
+  loop();
+}
+
+// ✅ Step 6: Auto-login function (if appstate.json already exists)
+function autoLogin() {
+  console.log("🔐 Attempting auto login...");
+  login({ appState }, (err, apiInstance) => {
+    if (err) {
+      console.log("❌ Auto login failed:", err.message);
+      console.log("⚠️ Please open browser and enter appstate manually.");
+      return;
+    }
+    api = apiInstance;
+    botRunning = true;
+    console.log("✅ Auto login successful!");
+    // groupID & lockedName will be set manually via console if needed
+    console.log("👉 Enter your groupID & lockedName manually or use UI.");
+  });
+}
+
+// ✅ Step 7: Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(\`🌐 Server running at http://localhost:\${PORT}\`);
+});
